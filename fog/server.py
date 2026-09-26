@@ -44,6 +44,22 @@ def home():
     return jsonify({"status": "fog running", "epoch": CURRENT_EPOCH,
                     "batch_size": len(CURRENT_BATCH)})
 
+@app.route("/reset", methods=["POST"])
+def reset():
+    global CURRENT_EPOCH, CURRENT_BATCH
+    SESSIONS.clear()
+    USED_NONCES.clear()
+    USED_REQUEST_NONCES.clear()
+    PENDING_REGISTRATIONS.clear()
+    CURRENT_BATCH = []
+    CURRENT_EPOCH = 1
+    ANCHORED_ROOTS.clear()
+    ANCHOR_CHAIN.clear()
+    PROOF_PACKAGES.clear()
+    TOKENS.clear()
+    REVOCATIONS.clear()
+    REVOKED_DEVICES.clear()
+    return jsonify({"ok": True, "msg": "state reset"})
 
 @app.route("/register/start", methods=["POST"])
 def register_start():
@@ -279,6 +295,7 @@ def revocation_status():
         "revoked_devices": list(REVOKED_DEVICES),
         "revoked_tokens": list(REVOCATIONS.keys()),
     })
+
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5000, debug=True)
