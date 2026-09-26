@@ -1,8 +1,25 @@
 import time, uuid, os
 from flask import Flask, request, jsonify
 from fog.crypto import hex_to_pubkey, verify
-from fog.merkle import hash_leaf
 from fog.models import DeviceIdentity
+from fog.crypto import generate_keypair, sign
+from fog.merkle import hash_leaf, build_tree, get_root, get_proof, verify_proof     
+import hashlib, json
+
+FOG_SK, FOG_PK = generate_keypair()
+ANCHOR_CHAIN = []   # [{epoch, root_hex, ts, prev_hash, anchor_hash}]
+TOKEN_TTL = 300  # 5 minutes for demo
+USED_REQUEST_NONCES = set()
+REVOKED_DEVICES = set()   # DIDs blocked from future epochs
+
+# role -> {resource: [allowed operations]}
+POLICY = {
+    "temperature-sensor": {"temperature": ["WRITE", "READ"]},
+    "pressure-sensor":    {"pressure":    ["WRITE", "READ"]},
+    "valve-controller":   {"valve":       ["WRITE", "READ"],
+                            "production-line": ["STOP"]},
+    "camera":             {"stream":      ["READ"]},
+}
 
 app = Flask(__name__)
 
@@ -101,24 +118,167 @@ def register_complete():
     return jsonify({"ok": True, "did": did, "leaf_hex": leaf.hex(),
                     "epoch": CURRENT_EPOCH, "batch_size": len(CURRENT_BATCH)})
 
-
-# remaining routes still stubbed — we fill them next step
 @app.route("/batch/finalize", methods=["POST"])
 def batch_finalize():
-    return jsonify({"ok": False, "msg": "not implemented"}), 501
+    global CURRENT_EPOCH, CURRENT_BATCH
+    if not CURRENT_BATCH:
+        return jsonify({"ok": False, "msg": "batch empty"}), 400
+
+    leaves = [leaf for _, leaf in CURRENT_BATCH]
+    levels = build_tree(leaves)
+    root = get_root(levels)
+
+    # anchor record (mini blockchain style)
+    ts = time.time()
+    prev = ANCHOR_CHAIN[-1]["anchor_hash"] if ANCHOR_CHAIN else "0" * 64
+    payload = f"{CURRENT_EPOCH}|{root.hex()}|{ts}|{prev}".encode()
+    anchor_hash = hashlib.sha256(payload).hexdigest()
+    ANCHOR_CHAIN.append({
+        "epoch": CURRENT_EPOCH, "root_hex": root.hex(),
+        "ts": ts, "prev_hash": prev, "anchor_hash": anchor_hash,
+    })
+    ANCHORED_ROOTS[CURRENT_EPOCH] = root
+
+    # proof package per device
+    for did, leaf in CURRENT_BATCH:
+        if did in REVOKED_DEVICES:
+            continue
+        proof = get_proof(levels, leaf)
+        # sign (leaf || root || epoch)
+        sign_payload = leaf + root + str(CURRENT_EPOCH).encode()
+        sig = sign(FOG_SK, sign_payload)
+        PROOF_PACKAGES[did] = {
+            "did": did, "leaf_hex": leaf.hex(),
+            "epoch": CURRENT_EPOCH, "root_hex": root.hex(),
+            "proof": [(s, h.hex()) for s, h in proof],
+            "fog_signature_hex": sig.hex(),
+        }
+
+    finalized_epoch = CURRENT_EPOCH
+    device_count = sum(1 for did, _ in CURRENT_BATCH if did not in REVOKED_DEVICES)
+    CURRENT_BATCH = []
+    CURRENT_EPOCH += 1
+
+    return jsonify({
+        "ok": True, "epoch_finalized": finalized_epoch,
+        "root_hex": root.hex(), "devices": device_count,
+        "anchor_hash": anchor_hash,
+    })
+
+@app.route("/proof/<did>", methods=["GET"])
+def get_proof_pkg(did):
+    pkg = PROOF_PACKAGES.get(did)
+    if not pkg:
+        return jsonify({"ok": False, "msg": "no proof for this DID"}), 404
+    return jsonify({"ok": True, "package": pkg})
 
 @app.route("/token/issue", methods=["POST"])
 def token_issue():
-    return jsonify({"ok": False, "msg": "not implemented"}), 501
+    data = request.get_json() or {}
+    did = data.get("did")
+    pk_hex = data.get("pk_hex")
+    scope = data.get("scope", "provisional")
+
+    if did not in PENDING_REGISTRATIONS:
+        return jsonify({"ok": False, "msg": "device not registered"}), 404
+    if PENDING_REGISTRATIONS[did].pk != pk_hex:
+        return jsonify({"ok": False, "msg": "pk mismatch"}), 401
+
+    now = time.time()
+    token_id = uuid.uuid4().hex
+    expires_at = now + TOKEN_TTL
+
+    payload = f"{did}|{pk_hex}|{scope}|{now}|{expires_at}|{token_id}".encode()
+    sig = sign(FOG_SK, payload)
+
+    TOKENS[token_id] = {
+        "did": did, "pk_hex": pk_hex, "scope": scope,
+        "issued_at": now, "expires_at": expires_at,
+        "token_id": token_id, "fog_signature_hex": sig.hex(),
+    }
+    return jsonify({"ok": True, "token": TOKENS[token_id]})
 
 @app.route("/resource/request", methods=["POST"])
 def resource_request():
-    return jsonify({"ok": False, "msg": "not implemented"}), 501
+    d = request.get_json() or {}
+    did        = d.get("did")
+    pk_hex     = d.get("pk_hex")
+    epoch      = d.get("epoch")
+    proof_in   = d.get("proof")            # [(side, hex), ...]
+    token_id   = d.get("token_id")
+    resource   = d.get("resource")
+    operation  = d.get("operation")
+    nonce_hex  = d.get("nonce")
+    sig_hex    = d.get("request_sig")
+
+    def deny(reason): return jsonify({"ok": False, "decision": "DENY", "reason": reason})
+    def allow():      return jsonify({"ok": True,  "decision": "ALLOW"})
+
+    # 1. epoch root exists
+    root = ANCHORED_ROOTS.get(epoch)
+    if root is None:
+        return deny("unknown epoch")
+
+    # 2. token checks
+    tok = TOKENS.get(token_id)
+    if not tok:                                    return deny("token not found")
+    if token_id in REVOCATIONS:                    return deny("token revoked")
+    if tok["did"] != did or tok["pk_hex"] != pk_hex: return deny("token/device mismatch")
+    if time.time() > tok["expires_at"]:            return deny("token expired")
+
+    # 3. recompute leaf + verify proof
+    leaf = hash_leaf(did, pk_hex)
+    proof = [(s, bytes.fromhex(h)) for s, h in proof_in]
+    if not verify_proof(leaf, proof, root):
+        return deny("proof invalid")
+
+    # 4. replay + fresh PoP
+    if nonce_hex in USED_REQUEST_NONCES:
+        return deny("nonce reused")
+    try:
+        pk_obj = hex_to_pubkey(pk_hex)
+        msg = (nonce_hex + resource + operation).encode()
+        if not verify(pk_obj, msg, bytes.fromhex(sig_hex)):
+            return deny("request signature invalid")
+    except Exception:
+        return deny("bad signature encoding")
+    USED_REQUEST_NONCES.add(nonce_hex)
+
+    # 5. policy
+    role = PENDING_REGISTRATIONS[did].metadata.get("type")
+    allowed = POLICY.get(role, {}).get(resource, [])
+    if operation not in allowed:
+        return deny(f"policy: {role} cannot {operation} {resource}")
+
+    return allow()
+
 
 @app.route("/revoke", methods=["POST"])
 def revoke():
-    return jsonify({"ok": False, "msg": "not implemented"}), 501
+    data = request.get_json() or {}
+    did = data.get("did")
+    token_id = data.get("token_id")
+    reason = data.get("reason", "unspecified")
 
+    if did and did in PENDING_REGISTRATIONS:
+        REVOKED_DEVICES.add(did)
+
+    if token_id and token_id in TOKENS:
+        REVOCATIONS[token_id] = {
+            "token_id": token_id,
+            "reason": reason,
+            "revoked_at": time.time(),
+        }
+
+    return jsonify({"ok": True, "revoked_device": did, "revoked_token": token_id,
+                    "revoked_devices": list(REVOKED_DEVICES)})
+
+@app.route("/revocation-status")
+def revocation_status():
+    return jsonify({
+        "revoked_devices": list(REVOKED_DEVICES),
+        "revoked_tokens": list(REVOCATIONS.keys()),
+    })
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5000, debug=True)

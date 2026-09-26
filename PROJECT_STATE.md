@@ -13,7 +13,8 @@ Merkle tree (SMT in Assignment 2).
 - fog/merkle.py       — build_tree, get_root, get_proof, verify_proof (sorted leaves)
 - fog/models.py       — DeviceIdentity, ProofPackage, Token, Revocation
 - fog/server.py       — Flask endpoints (register working; batch/token/verify/revoke stubbed)
-- device/test_register.py — 3-device registration test
+- device/test_register.py, test_batch.py, test_token.py, test_verify.py, test_revoke.py
+- PROJECT_STATE.md
 - README.md
 - .gitignore
 
@@ -22,13 +23,13 @@ Merkle tree (SMT in Assignment 2).
 - [x] Step 2: Crypto utils
 - [x] Step 3: Merkle tree + proofs
 - [x] Step 4: /register/start, /register/challenge, /register/complete (PSK + PoP + leaf)
-- [ ] Step 5: Batch finalize + root anchor + proof package
-- [ ] Step 6: Temporary token
-- [ ] Step 7: Verification pipeline (leaf → root → proof → token → policy)
-- [ ] Step 8: Revocation
+- [x] Step 5: Batch finalize + root anchor + proof package
+- [x] Step 6: Temporary token
+- [x] Step 7: Verification pipeline (leaf → root → proof → token → policy)
+- [x] Step 8: Revocation
 - [ ] Step 9: 3+ attacks
 - [ ] Step 10: Perf + graphs + report
 
 ## Contribution split (2 people)
-- You (complex): crypto, merkle, server core, batch, verify, attacks, perf
+- You: crypto, merkle, server core, batch, verify, attacks, perf
 - Partner: device simulator, token module, routes wiring, policy.json, README, plots
