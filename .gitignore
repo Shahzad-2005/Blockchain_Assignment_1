@@ -5,3 +5,5 @@ venv/
 data/*.db
 data/*.csv
 .env
+fog/cert.pem
+fog/key.pem
