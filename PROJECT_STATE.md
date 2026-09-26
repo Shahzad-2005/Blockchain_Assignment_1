@@ -14,6 +14,8 @@ Merkle tree (SMT in Assignment 2).
 - fog/models.py       — DeviceIdentity, ProofPackage, Token, Revocation
 - fog/server.py       — Flask endpoints (register working; batch/token/verify/revoke stubbed)
 - device/test_register.py, test_batch.py, test_token.py, test_verify.py, test_revoke.py
+- perf/batch_vs_individual.py
+- data/batch_vs_individual.txt
 - PROJECT_STATE.md
 - README.md
 - .gitignore
@@ -27,8 +29,9 @@ Merkle tree (SMT in Assignment 2).
 - [x] Step 6: Temporary token
 - [x] Step 7: Verification pipeline (leaf → root → proof → token → policy)
 - [x] Step 8: Revocation
-- [ ] Step 9: 3+ attacks
-- [ ] Step 10: Perf + graphs + report
+- [x] Step 9: 3+ attacks
+- [x] Step 10: Perf + graphs + report
+- [x] Batch vs Individual comparison (perf/batch_vs_individual.py)
 
 ## Contribution split (2 people)
 - You: crypto, merkle, server core, batch, verify, attacks, perf

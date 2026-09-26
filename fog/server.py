@@ -3,7 +3,9 @@ from flask import Flask, request, jsonify
 from fog.crypto import hex_to_pubkey, verify
 from fog.models import DeviceIdentity
 from fog.crypto import generate_keypair, sign
-from fog.merkle import hash_leaf, build_tree, get_root, get_proof, verify_proof     
+from fog.merkle import hash_leaf, build_tree, get_root, get_proof, verify_proof  
+from fog.policy import is_allowed   
+from fog.token import issue_token, validate_token
 import hashlib, json
 
 FOG_SK, FOG_PK = generate_keypair()
@@ -11,15 +13,6 @@ ANCHOR_CHAIN = []   # [{epoch, root_hex, ts, prev_hash, anchor_hash}]
 TOKEN_TTL = 300  # 5 minutes for demo
 USED_REQUEST_NONCES = set()
 REVOKED_DEVICES = set()   # DIDs blocked from future epochs
-
-# role -> {resource: [allowed operations]}
-POLICY = {
-    "temperature-sensor": {"temperature": ["WRITE", "READ"]},
-    "pressure-sensor":    {"pressure":    ["WRITE", "READ"]},
-    "valve-controller":   {"valve":       ["WRITE", "READ"],
-                            "production-line": ["STOP"]},
-    "camera":             {"stream":      ["READ"]},
-}
 
 app = Flask(__name__)
 
@@ -200,19 +193,9 @@ def token_issue():
     if PENDING_REGISTRATIONS[did].pk != pk_hex:
         return jsonify({"ok": False, "msg": "pk mismatch"}), 401
 
-    now = time.time()
-    token_id = uuid.uuid4().hex
-    expires_at = now + TOKEN_TTL
-
-    payload = f"{did}|{pk_hex}|{scope}|{now}|{expires_at}|{token_id}".encode()
-    sig = sign(FOG_SK, payload)
-
-    TOKENS[token_id] = {
-        "did": did, "pk_hex": pk_hex, "scope": scope,
-        "issued_at": now, "expires_at": expires_at,
-        "token_id": token_id, "fog_signature_hex": sig.hex(),
-    }
-    return jsonify({"ok": True, "token": TOKENS[token_id]})
+    tok = issue_token(did, pk_hex, scope, FOG_SK)
+    TOKENS[tok["token_id"]] = tok
+    return jsonify({"ok": True, "token": tok})
 
 @app.route("/resource/request", methods=["POST"])
 def resource_request():
@@ -237,10 +220,9 @@ def resource_request():
 
     # 2. token checks
     tok = TOKENS.get(token_id)
-    if not tok:                                    return deny("token not found")
-    if token_id in REVOCATIONS:                    return deny("token revoked")
-    if tok["did"] != did or tok["pk_hex"] != pk_hex: return deny("token/device mismatch")
-    if time.time() > tok["expires_at"]:            return deny("token expired")
+    ok, reason = validate_token(tok, did, pk_hex, set(REVOCATIONS.keys()))
+    if not ok:
+        return deny(reason)
 
     # 3. recompute leaf + verify proof
     leaf = hash_leaf(did, pk_hex)
@@ -262,8 +244,7 @@ def resource_request():
 
     # 5. policy
     role = PENDING_REGISTRATIONS[did].metadata.get("type")
-    allowed = POLICY.get(role, {}).get(resource, [])
-    if operation not in allowed:
+    if not is_allowed(role, resource, operation):
         return deny(f"policy: {role} cannot {operation} {resource}")
 
     return allow()
