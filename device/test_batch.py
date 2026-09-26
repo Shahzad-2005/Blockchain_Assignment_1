@@ -1,8 +1,14 @@
 import requests
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+_orig_sess_request = requests.Session.request
+requests.Session.request = lambda self, *a, **kw: _orig_sess_request(
+    self, *a, **{**kw, "verify": False})
+
 from fog.crypto import generate_keypair, pubkey_to_hex, sign
 from fog.merkle import hash_leaf, verify_proof
 
-FOG = "http://127.0.0.1:5000"
+FOG = "https://127.0.0.1:5000"
 PSK = "zone-A-psk-2026"
 
 def register(did):

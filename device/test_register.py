@@ -1,7 +1,13 @@
 import requests
 from fog.crypto import generate_keypair, pubkey_to_hex, sign
 
-FOG = "http://127.0.0.1:5000"
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+_orig_sess_request = requests.Session.request
+requests.Session.request = lambda self, *a, **kw: _orig_sess_request(
+    self, *a, **{**kw, "verify": False})
+
+FOG = "https://127.0.0.1:5000"
 PSK = "zone-A-psk-2026"
 
 def register(did):
