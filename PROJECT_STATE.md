@@ -1,0 +1,34 @@
+# Project State — IIoT Decentralized Identity (Assignment 1)
+
+## Goal
+Single-zone IIoT IdM: 1 fog node, multiple simulated devices.
+Implement: registration → batch → proof → token → verification → resource → revocation + attacks + perf.
+
+## Stack
+Python 3.14, Flask, cryptography (ECDSA P-256), hashlib (SHA-256), SQLite, matplotlib.
+Merkle tree (SMT in Assignment 2).
+
+## Files (current)
+- fog/crypto.py       — ECC keygen, ECDSA sign/verify, pubkey hex ser/deser
+- fog/merkle.py       — build_tree, get_root, get_proof, verify_proof (sorted leaves)
+- fog/models.py       — DeviceIdentity, ProofPackage, Token, Revocation
+- fog/server.py       — Flask endpoints (register working; batch/token/verify/revoke stubbed)
+- device/test_register.py — 3-device registration test
+- README.md
+- .gitignore
+
+## Progress checklist
+- [x] Step 1: Data models
+- [x] Step 2: Crypto utils
+- [x] Step 3: Merkle tree + proofs
+- [x] Step 4: /register/start, /register/challenge, /register/complete (PSK + PoP + leaf)
+- [ ] Step 5: Batch finalize + root anchor + proof package
+- [ ] Step 6: Temporary token
+- [ ] Step 7: Verification pipeline (leaf → root → proof → token → policy)
+- [ ] Step 8: Revocation
+- [ ] Step 9: 3+ attacks
+- [ ] Step 10: Perf + graphs + report
+
+## Contribution split (2 people)
+- You (complex): crypto, merkle, server core, batch, verify, attacks, perf
+- Partner: device simulator, token module, routes wiring, policy.json, README, plots
