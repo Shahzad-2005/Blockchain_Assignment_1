@@ -251,6 +251,13 @@ All four attacks blocked: replay, tampered proof, stolen token, revoked token.
 ![Benchmark](screenshots/07_benchmark.png)
 5 runs per device count across 5, 10, 25, 50, 100 devices.
 
-### A.8 Scalability graph
-![Batch graph](screenshots/08_graph_batch.png)
-Batch-processing time across N under TLS. Absolute values include handshake overhead; pure Merkle cost is isolated in Section 5.
+### A.8 Scalability graphs
+
+![Batch time](screenshots/08_graph_batch.png)
+**Batch processing time vs device count.** Absolute values include TLS handshake overhead; pure Merkle cost is isolated in Section 5.
+
+![Verification latency](screenshots/09_graph_verify.png)
+**Verification latency vs device count.** Remains roughly stable (72–81 ms), matching the O(log n) proof-path expectation.
+
+![Throughput](screenshots/10_graph_throughput.png)
+**Registration throughput vs device count.** Plateaus, confirming per-operation cost does not grow with N.
