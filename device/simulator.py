@@ -94,6 +94,7 @@ def main(n_devices: int):
     # Phase 2: temporary tokens
     for d in devices:
         d.request_token()
+        print(f"  {d.did:24s} token_id={d.token_id[:12]}... scope=provisional")
     print("[simulator] temporary tokens issued\n")
 
     # Finalize batch
